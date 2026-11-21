@@ -987,7 +987,9 @@ static int p5_intercept_coverage(P5Map *map,const Snapshot *s,Position post,Posi
 static int p5_intercept_post(P5Map *map,const Snapshot *s,const double weights[P5_MODELS],int leader,P5Memory *plan)
 {
     Position origin=s->key,me=s->players[s->self].pos;
-    int delay=0,hp=2,x,y,i,d,found=0;double best=-1e30,votes[4]={0.15,0.15,0.15,0.15};
+    P5Memory best_plan=*plan,alternate_plan=*plan;
+    int delay=0,hp=2,x,y,i,d,found=0,alternate=0;
+    double best=-1e30,second=-1e30,votes[4]={0.15,0.15,0.15,0.15};
     if(s->key_owner>=0){
         leader=s->key_owner;origin=s->players[leader].pos;hp=s->players[leader].hp;
         for(i=0;i<P5_MODELS;++i){Command commands[PLAYER_COUNT];p5_hypothesis(map,s,i,commands);
@@ -1023,7 +1025,23 @@ static int p5_intercept_post(P5Map *map,const Snapshot *s,const double weights[P
             exits=p5_post_exits(s,post,&safe);if(exits<2)continue;
             score=35*support-14*ours-4*(eta-ours)+8*safe-22*threats+
                 12*p5_intercept_coverage(map,s,post,hit);
-            if(score>best){best=score;plan->waypoint=post;plan->aim=hit;plan->target=leader;found=1;}
+            if(score>best){
+                if(found&&!p5_same(post,best_plan.waypoint)){second=best;alternate_plan=best_plan;alternate=1;}
+                best=score;best_plan.waypoint=post;best_plan.aim=hit;best_plan.target=leader;found=1;
+            }else if(found&&!p5_same(post,best_plan.waypoint)&&score>second){
+                second=score;alternate_plan.waypoint=post;alternate_plan.aim=hit;alternate_plan.target=leader;alternate=1;
+            }
+        }
+    }
+    if(found){
+        *plan=best_plan;
+        /* Pick one coherent interception post, not a random action every turn.
+           The existing memory keeps it for several turns.  Urgent exit defence
+           and clearly inferior alternatives remain deterministic. */
+        if(alternate&&s->key_owner>=0&&s->players[s->self].hp==MAX_HP&&
+            p5_steps(map,s->players[s->key_owner].pos,s->exit,1)>3&&second>=best-12.0){
+            struct timespec ts;timespec_get(&ts,TIME_UTC);
+            if(((unsigned int)ts.tv_nsec^(unsigned int)ts.tv_sec)&1u)*plan=alternate_plan;
         }
     }
     return found;
