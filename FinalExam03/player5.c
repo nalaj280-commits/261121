@@ -1319,7 +1319,7 @@ Command player5_choose_command(const char *state_path)
     double risk[COMMAND_COUNT],values[P5_MODELS][COMMAND_COUNT],weights[P5_MODELS],loop_cost[COMMAND_COUNT]={0},plan_bonus[COMMAND_COUNT]={0};
     int fatal[COMMAND_COUNT],reset,memory_valid,defending=0;unsigned int blockers;
     char memory_path[1024];
-    Command result=COMMAND_ATTACK_UP;
+    Command result=COMMAND_ATTACK_UP,opening_hint=COMMAND_COUNT;
     int p5x_forced=-1; /* 규칙이 행동을 확정하면 0 이상: 탐색을 건너뛴다 */
     if(!file)return result;ok=snapshot_read(file,&root);fclose(file);
     if(!ok||root.turn<0||!p5_inside(&root,root.key)||!p5_inside(&root,root.key_start)||!p5_inside(&root,root.exit))return result;
@@ -1330,7 +1330,7 @@ Command player5_choose_command(const char *state_path)
         for(i=0;i<4;++i){Position p={root.players[root.self].pos.x+p5_dx[i],root.players[root.self].pos.y+p5_dy[i]};
             if(p5_same(p,root.exit))return (Command)i;}
     }
-    result=p5_model(&root);
+    result=p5_model(&root);opening_hint=result;
     memset(&map,0,sizeof(map));map.terrain=&root;map.cells=root.size*root.size;
     map.distance=(int *)malloc((size_t)2*map.cells*map.cells*sizeof(int));
     beams=(P5Node *)calloc(P5_MODELS*P5_WIDTH,sizeof(*beams));next=(P5Node *)calloc(P5_MODELS*P5_WIDTH,sizeof(*next));
@@ -1346,6 +1346,18 @@ Command player5_choose_command(const char *state_path)
     p5_observe(&map,&root,&memory,memory_valid,weights);
     p5_escape_routes(&map,&root,&memory);
     p5_update_plan(&map,&root,weights,&memory);
+    /* The tournament version already changes its fallback from a lost key race
+       to route interception.  In the first 20 turns, give that original choice
+       only a small tie-breaking bonus when another player is three pickup turns
+       ahead; the full six-model search remains free to reject it. */
+    if(root.turn<=20&&root.key_owner<0&&opening_hint>=0&&opening_hint<12){
+        int mine=p5_pickup_steps(&map,&root,root.players[root.self].pos),fastest=1000;
+        for(i=0;i<PLAYER_COUNT;++i)if(i!=root.self&&root.players[i].hp>0){
+            int eta=p5_pickup_steps(&map,&root,root.players[i].pos);
+            if(eta<fastest)fastest=eta;
+        }
+        if(mine>=fastest+3)plan_bonus[opening_hint]+=18;
+    }
     if(p5x_forced<0&&root.key_owner==root.self&&root.players[root.self].hp==2){
         /* 운반 규칙: 열쇠를 들고 HP 2면 한 번 맞아도 죽지 않으므로 탐색 대신 최단경로로 출구까지 전진한다. */
         Position me=root.players[root.self].pos,gates[16],target=root.exit;int ng=p5x_gates(&map,&root,gates,16),g,d,best=100000,bd=-1,bestv;
